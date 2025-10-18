@@ -1,0 +1,1 @@
+from db import get_conn\n\ndef get_user_by_id(user_id: int):\n    with get_conn() as conn:\n        with conn.cursor() as cur:\n            cur.execute("SELECT id, login, full_name FROM users WHERE id=%s", (user_id,))\n            return cur.fetchone()

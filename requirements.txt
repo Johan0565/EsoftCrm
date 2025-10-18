@@ -1,0 +1,4 @@
+PySide6==6.7.2
+PyMySQL==1.1.0
+python-dotenv==1.0.1
+email-validator==2.2.0
