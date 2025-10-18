@@ -1,50 +1,71 @@
-from PyQt5 import QtWidgets
+from PySide6.QtWidgets import QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QMessageBox, QGroupBox
 from ui_header import Header
+import auth
 
-class RegisterWindow(QtWidgets.QDialog):
-    def __init__(self):
+class RegisterWindow(QWidget):
+    def __init__(self, app_title: str, logo_path: str, on_open_login, on_registration_started):
         super().__init__()
-        self.setWindowTitle("Регистрация (+ пользователи, + лиды)")
-        self.resize(720, 500)
+        self.setWindowTitle(app_title)
+        self.on_open_login = on_open_login
+        self.on_registration_started = on_registration_started
 
-        root = QtWidgets.QVBoxLayout(self)
-        root.addWidget(Header("Регистрация"))
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12,12,12,12)
+        root.setSpacing(12)
 
-        form = QtWidgets.QFormLayout()
-        self.fio = QtWidgets.QLineEdit()
-        self.login = QtWidgets.QLineEdit()
-        self.password = QtWidgets.QLineEdit()
-        self.password.setEchoMode(QtWidgets.QLineEdit.Password)
-        form.addRow("ФИО:", self.fio)
-        form.addRow("Логин:", self.login)
-        form.addRow("Пароль:", self.password)
+        root.addWidget(Header(app_title, logo_path))
 
-        buttons = QtWidgets.QHBoxLayout()
-        self.btn_register = QtWidgets.QPushButton("Зарегистрировать")
-        self.btn_users = QtWidgets.QPushButton("Пользователи")
-        self.btn_leads = QtWidgets.QPushButton("Лиды")
-        self.btn_register.clicked.connect(self._stub)
-        self.btn_users.clicked.connect(self.open_users)
-        self.btn_leads.clicked.connect(self.open_leads)
+        card = QGroupBox('Регистрация')
+        form = QVBoxLayout(card)
+        form.setContentsMargins(12,12,12,12)
+        form.setSpacing(12)
 
-        root.addLayout(form)
-        root.addStretch(1)
-        buttons.addWidget(self.btn_register)
-        buttons.addWidget(self.btn_users)
-        buttons.addWidget(self.btn_leads)
-        root.addLayout(buttons)
+        self.full_name = QLineEdit()
+        self.login = QLineEdit()
+        self.email = QLineEdit()
+        self.pwd = QLineEdit(); self.pwd.setEchoMode(QLineEdit.Password)
+        self.pwd2 = QLineEdit(); self.pwd2.setEchoMode(QLineEdit.Password)
 
-    def _stub(self):
-        QtWidgets.QMessageBox.information(self, "Заглушка",
-            "Регистрация пока не подключена к БД.
-Этап 3: добавлен список лидов.")
+        form.addWidget(QLabel('ФИО'))
+        form.addWidget(self.full_name)
+        form.addWidget(QLabel('Логин'))
+        form.addWidget(self.login)
+        form.addWidget(QLabel('Email'))
+        form.addWidget(self.email)
+        form.addWidget(QLabel('Пароль'))
+        form.addWidget(self.pwd)
+        form.addWidget(QLabel('Повторите пароль'))
+        form.addWidget(self.pwd2)
 
-    def open_users(self):
-        from users_window import UsersWindow
-        w = UsersWindow(self)
-        w.show()
+        actions = QHBoxLayout()
+        btn_send = QPushButton('Получить код на почту')
+        btn_send.clicked.connect(self.start_registration)
+        btn_login = QPushButton('Ко входу')
+        btn_login.setObjectName('secondary')
+        btn_login.clicked.connect(self.on_open_login)
+        actions.addWidget(btn_send)
+        actions.addWidget(btn_login)
+        actions.addStretch(1)
 
-    def open_leads(self):
-        from leads_window import LeadsWindow
-        w = LeadsWindow(self)
-        w.show()
+        form.addLayout(actions)
+        hint = QLabel('На почту придёт 6-значный код подтверждения.')
+        hint.setProperty('role','hint')
+        form.addWidget(hint)
+
+        root.addWidget(card)
+
+    def start_registration(self):
+        if self.pwd.text() != self.pwd2.text():
+            QMessageBox.warning(self, 'Ошибка', 'Пароль и подтверждение не совпадают')
+            return
+        try:
+            auth.send_registration_code(
+                self.full_name.text().strip(),
+                self.login.text().strip(),
+                self.email.text().strip(),
+                self.pwd.text()
+            )
+        except Exception as e:
+            QMessageBox.warning(self, 'Ошибка регистрации', str(e))
+            return
+        self.on_registration_started(self.login.text().strip())
