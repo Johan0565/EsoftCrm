@@ -8,6 +8,19 @@ from db import get_conn
 from algorithms import fuzzy_match
 from user_form import UserForm
 
+def _is_admin(user_id: int) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""SELECT 1
+                              FROM user_roles ur
+                              JOIN roles r ON r.id=ur.role_id
+                              WHERE ur.user_id=%s AND r.code='admin'
+                              LIMIT 1""", (user_id,))
+                return cur.fetchone() is not None
+    except Exception:
+        return False
+
 class UsersWindow(QWidget):
     def __init__(self, app_title: str, logo_path: str, current_user_id: int):
         super().__init__()
@@ -59,34 +72,17 @@ class UsersWindow(QWidget):
 
         root.addWidget(card)
 
+        # delete доступна только администратору
+        self.btn_delete.setEnabled(_is_admin(self.current_user_id))
+
         self._raw_rows = []
         self.reload()
 
-    def ensure_schema(self):
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                for col, ddl in [
-                    ('login', "ALTER TABLE users ADD COLUMN login VARCHAR(100) UNIQUE"),
-                    ('password_hash', "ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)"),
-                    ('first_name', "ALTER TABLE users ADD COLUMN first_name VARCHAR(100)"),
-                    ('last_name', "ALTER TABLE users ADD COLUMN last_name VARCHAR(100)"),
-                    ('middle_name', "ALTER TABLE users ADD COLUMN middle_name VARCHAR(100)"),
-                    ('skill_products', "ALTER TABLE users ADD COLUMN skill_products DECIMAL(3,2) NOT NULL DEFAULT 0"),
-                    ('skill_objections', "ALTER TABLE users ADD COLUMN skill_objections DECIMAL(3,2) NOT NULL DEFAULT 0"),
-                    ('skill_sales', "ALTER TABLE users ADD COLUMN skill_sales DECIMAL(3,2) NOT NULL DEFAULT 0"),
-                    ('is_deleted', "ALTER TABLE users ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0")
-                ]:
-                    cur.execute("SHOW COLUMNS FROM users LIKE %s", (col,))
-                    if not cur.fetchone():
-                        cur.execute(ddl)
-
     def reload(self):
-        self.ensure_schema()
         sql = (
-            "SELECT u.id, COALESCE(u.full_name, CONCAT_WS(' ', u.last_name, u.first_name, u.middle_name)) AS fio, "
-            "u.login, COALESCE(u.is_deleted,0) AS is_deleted, "
-            "(SELECT COUNT(*) FROM leads WHERE current_assignee_id=u.id AND is_active=1) AS active_leads, "
-            "(SELECT COUNT(*) FROM leads WHERE current_assignee_id=u.id AND is_active=0) AS inactive_leads, "
+            "SELECT u.id, u.full_name AS fio, u.login, COALESCE(u.is_deleted,0) AS is_deleted, "
+            "(SELECT COUNT(*) FROM leads WHERE current_assignee_id=u.id AND is_active=1 AND COALESCE(is_deleted,0)=0) AS active_leads, "
+            "(SELECT COUNT(*) FROM leads WHERE current_assignee_id=u.id AND is_active=0 AND COALESCE(is_deleted,0)=0) AS inactive_leads, "
             "(SELECT COUNT(*) FROM calls WHERE user_id=u.id AND COALESCE(is_deleted,0)=0) AS calls_cnt "
             "FROM users u ORDER BY fio"
         )
@@ -123,12 +119,12 @@ class UsersWindow(QWidget):
         uid = self._selected_user_id()
         if not uid:
             QMessageBox.information(self,'Открыть','Выберите пользователя'); return
-        dlg = UserForm(uid, parent=self)
+        dlg = UserForm(uid, current_user_id=self.current_user_id, parent=self)
         dlg.exec()
         self.reload()
 
     def create_new(self):
-        dlg = UserForm(None, parent=self)
+        dlg = UserForm(None, current_user_id=self.current_user_id, parent=self)
         dlg.exec()
         self.reload()
 
@@ -138,9 +134,27 @@ class UsersWindow(QWidget):
             QMessageBox.information(self,'Удалить','Выберите пользователя'); return
         if uid == self.current_user_id:
             QMessageBox.warning(self,'Удаление запрещено','Нельзя удалить себя.'); return
-        if QMessageBox.question(self,'Подтверждение','Пометить пользователя как удалённого?') != QMessageBox.Yes:
+        if not _is_admin(self.current_user_id):
+            QMessageBox.warning(self, 'Удаление запрещено', 'Удалять пользователей может только администратор.')
             return
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE users SET is_deleted=1 WHERE id=%s", (uid,))
+        if QMessageBox.question(self,'Подтверждение','Полностью удалить пользователя из БД? Это действие нельзя отменить.') != QMessageBox.Yes:
+            return
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    # Переназначаем все лиды на текущего админа
+                    cur.execute("UPDATE leads SET current_assignee_id=%s WHERE current_assignee_id=%s", (self.current_user_id, uid))
+                    # Чистим зависимые записи (где нет каскада)
+                    cur.execute("DELETE FROM calls WHERE user_id=%s", (uid,))
+                    cur.execute("DELETE FROM lead_assignments WHERE user_id=%s", (uid,))
+                    # Остальные связи имеют CASCADE, но выполним безопасно
+                    cur.execute("DELETE FROM auth_credentials WHERE user_id=%s", (uid,))
+                    cur.execute("DELETE FROM email_verification_codes WHERE user_id=%s", (uid,))
+                    cur.execute("DELETE FROM user_roles WHERE user_id=%s", (uid,))
+                    cur.execute("DELETE FROM user_skills WHERE user_id=%s", (uid,))
+                    # Наконец удаляем пользователя
+                    cur.execute("DELETE FROM users WHERE id=%s", (uid,))
+            QMessageBox.information(self, 'Удаление', 'Пользователь полностью удалён.')
+        except Exception as e:
+            QMessageBox.warning(self, 'Ошибка удаления', f'Не удалось удалить: {e}')
         self.reload()

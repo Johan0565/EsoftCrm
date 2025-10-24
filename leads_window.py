@@ -186,10 +186,10 @@ class LeadsWindow(QWidget):
             QMessageBox.information(self, 'Открыть', 'Выберите лид в списке')
             return
         lead_id, _ = s
-        LeadForm(lead_id, self.current_user_id, parent=self).exec()
+        LeadForm(lead_id, current_user_id=self.current_user_id, parent=self).exec()
 
     def create_new(self):
-        LeadForm(None, self.current_user_id, parent=self).exec()
+        LeadForm(None, current_user_id=self.current_user_id, parent=self).exec()
         self.reload()
 
     def delete_selected(self):
