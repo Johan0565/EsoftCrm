@@ -17,12 +17,6 @@ def levenshtein(a: str, b: str) -> int:
         prev = cur
     return prev[-1]
 
-def fuzzy_match(full_name: str, login: str, query: str, max_dist: int = 2) -> bool:
-    if not query:
-        return True
-    q = query.strip().lower()
-    return min(levenshtein((full_name or '').lower(), q),
-               levenshtein((login or '').lower(), q)) <= max_dist
 
 def quality_component(user_skills: Sequence[float], req: Sequence[float]) -> float:
     if not user_skills or not req:
